@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>SLM Assistant</title>
+<style>
+body { font-family: Arial; margin:40px }
+#chat { border:1px solid #ccc; padding:10px; height:300px; overflow:auto }
+</style>
+</head>
+
+<body>
+
+<h2>Personal AI Assistant</h2>
+
+<div id="chat"></div>
+
+<input id="msg" placeholder="Ask something..." style="width:80%">
+<button onclick="send()">Send</button>
+
+<script>
+async function send() {
+
+    const input = document.getElementById("msg")
+    const chat = document.getElementById("chat")
+
+    const message = input.value
+
+    chat.innerHTML += "<b>You:</b> " + message + "<br>"
+
+    const res = await fetch("/chat", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message})
+    })
+
+    const data = await res.json()
+
+    chat.innerHTML += "<b>AI:</b> " + data.response + "<br><br>"
+
+    input.value=""
+}
+</script>
+
+</body>
+</html>
