@@ -1,9 +1,11 @@
-# SLM Personal Assistant
-
-Simple Small Language Model chatbot API using FastAPI and Hugging Face.
+# SLM Assistant (Clean Code + TDD Demo)
 
 ## Run with Docker
-docker compose up -d --build
+docker-compose up --build
 
-Open:
-http://localhost:8000/docs
+## Run locally
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+## Run tests
+pytest
