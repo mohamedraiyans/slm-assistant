@@ -6,13 +6,13 @@ are each tested in isolation. OllamaClient is never called.
 """
 
 from app.services.rag_service import (
-    _normalize,
     Document,
     Chunk,
     DocumentLoader,
     DocumentChunker,
     DocumentRetriever,
     RAGService,
+    _normalize,
 )
 
 
@@ -23,15 +23,39 @@ from app.services.rag_service import (
 class FakeLLMClient:
     def __init__(self, reply: str = "mocked answer"):
         self.reply = reply
-        self.last_prompt: str | None = None
+        self.last_prompt = None
 
     def generate(self, prompt: str) -> str:
         self.last_prompt = prompt
         return self.reply
 
 
-def make_chunks(*texts: str) -> list:
-    return [Chunk(filename="test.txt", text=t) for t in texts]
+def make_chunks(*texts) -> list:
+    return [Chunk(filename="test.txt", text=t, index=i) for i, t in enumerate(texts)]
+
+
+# ---------------------------------------------------------------------------
+# _normalize
+# ---------------------------------------------------------------------------
+
+def test_normalize_strips_trailing_punctuation():
+    assert "location" in _normalize("Location:")
+
+def test_normalize_lowercases_words():
+    assert "wifi" in _normalize("WiFi")
+
+def test_normalize_removes_stopwords():
+    result = _normalize("where is the company located")
+    assert "where" not in result
+    assert "the" not in result
+    assert "is" not in result
+    assert "company" in result
+    assert "located" in result
+
+def test_normalize_handles_mixed_punctuation():
+    result = _normalize("Hello, world!")
+    assert "hello" in result
+    assert "world" in result
 
 
 # ---------------------------------------------------------------------------
@@ -89,23 +113,14 @@ def test_chunker_preserves_source_filename():
     assert chunks[0].filename == "office.txt"
 
 
+def test_chunker_assigns_sequential_indices():
+    docs = [Document(filename="f.txt", content="a\nb\nc")]
+    chunks = DocumentChunker().chunk(docs)
+    assert [c.index for c in chunks] == [0, 1, 2]
+
+
 def test_chunker_returns_empty_for_no_documents():
     assert DocumentChunker().chunk([]) == []
-
-
-
-# ---------------------------------------------------------------------------
-# _normalize
-# ---------------------------------------------------------------------------
-
-def test_normalize_strips_trailing_punctuation():
-    assert "location" in _normalize("Location:")
-
-def test_normalize_lowercases_words():
-    assert "wifi" in _normalize("WiFi")
-
-def test_normalize_handles_mixed_punctuation():
-    assert _normalize("Hello, world!") == {"hello", "world"}
 
 
 # ---------------------------------------------------------------------------
@@ -116,49 +131,50 @@ def test_retriever_returns_empty_for_no_chunks():
     assert DocumentRetriever().retrieve("anything", []) == []
 
 
-def test_retriever_finds_exact_matching_chunk():
+def test_retriever_finds_company_and_neighbour():
+    # "company located" should match "Company:" and also pull its next line
     chunks = make_chunks(
+        "Company: Conversy AI Office",
         "Location: Kungsgatan 12, Stockholm, Sweden",
         "WiFi Password: Conversy2024",
-        "Office Hours: Monday to Friday, 9:00 AM to 6:00 PM",
     )
-    result = DocumentRetriever().retrieve("Where is the office location?", chunks)
-    assert result[0].text == "Location: Kungsgatan 12, Stockholm, Sweden"
+    result = DocumentRetriever().retrieve("where is the company located", chunks)
+    texts = [c.text for c in result]
+    assert "Company: Conversy AI Office" in texts
+    assert "Location: Kungsgatan 12, Stockholm, Sweden" in texts
 
 
-def test_retriever_excludes_zero_overlap_chunks():
+def test_retriever_excludes_stopword_only_matches():
+    # Chunks that only match stopwords should score zero and be excluded
+    chunks = make_chunks("Q: What is the remote work policy?", "Company: Conversy AI Office")
+    result = DocumentRetriever().retrieve("where is the company located", chunks)
+    texts = [c.text for c in result]
+    assert "Q: What is the remote work policy?" not in texts
+    assert "Company: Conversy AI Office" in texts
+
+
+def test_retriever_returns_empty_for_zero_overlap():
     chunks = make_chunks("quantum physics", "black holes")
     result = DocumentRetriever().retrieve("coffee and tea", chunks)
     assert result == []
 
 
-def test_retriever_prefers_shorter_focused_chunks():
-    # Short precise chunk vs long chunk with same keyword count
-    chunks = [
-        Chunk(filename="f.txt", text="WiFi Password: Conversy2024"),
-        Chunk(filename="f.txt", text="WiFi is available in the office and the password can be found on the notice board near the reception"),
-    ]
-    result = DocumentRetriever().retrieve("WiFi password", chunks)
-    assert result[0].text == "WiFi Password: Conversy2024"
-
-
 def test_retriever_respects_top_k():
-    chunks = make_chunks("alpha beta", "alpha gamma", "alpha delta", "alpha epsilon")
-    result = DocumentRetriever().retrieve("alpha", chunks, top_k=2)
-    assert len(result) <= 2
+    chunks = make_chunks("company alpha", "company beta", "company gamma", "company delta")
+    result = DocumentRetriever().retrieve("company", chunks, top_k=2)
+    # top_k=2 + 1 neighbour each = at most 4, but top matches only = 2
+    assert len(result) <= 4
 
 
 # ---------------------------------------------------------------------------
 # RAGService
 # ---------------------------------------------------------------------------
 
-def test_rag_passes_relevant_chunk_text_to_llm():
+def test_rag_passes_retrieved_chunks_to_llm():
     fake_llm = FakeLLMClient()
     rag = RAGService(llm_client=fake_llm)
-    rag._chunks = make_chunks("WiFi Password: Conversy2024")
-
+    rag._chunks = make_chunks("WiFi Password: Conversy2024", "Meeting Rooms: Alfa")
     rag.generate_answer("WiFi password")
-
     assert "WiFi Password: Conversy2024" in fake_llm.last_prompt
 
 

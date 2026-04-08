@@ -1,9 +1,5 @@
 """
 API routes for the SLM Assistant.
-
-Services are injected via FastAPI's dependency injection system
-rather than being instantiated at module level — this keeps
-routes testable and free of hidden global state.
 """
 
 from fastapi import APIRouter, Depends
@@ -15,15 +11,8 @@ from app.services.memory_service import MemoryService
 
 router = APIRouter()
 
-
-def get_rag_service() -> RAGService:
-    rag = RAGService()
-    rag.load_documents()
-    return rag
-
-
-# Application-scoped singletons — created once, reused per request.
-_rag_service = get_rag_service()
+_rag_service = RAGService()
+_rag_service.load_documents()
 _memory_service = MemoryService()
 _chat_service = ChatService(_rag_service, _memory_service)
 
