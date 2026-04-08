@@ -1,19 +1,70 @@
-from fastapi import APIRouter
+"""
+API routes for the SLM Assistant.
+
+Services are injected via FastAPI's dependency injection system
+rather than being instantiated at module level — this keeps
+routes testable and free of hidden global state.
+"""
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+
 from app.services.chat_service import ChatService
 from app.services.rag_service import RAGService
 from app.services.memory_service import MemoryService
 
 router = APIRouter()
 
-rag_service = RAGService()
-memory_service = MemoryService()
-chat_service = ChatService(rag_service, memory_service)
+
+def get_rag_service() -> RAGService:
+    rag = RAGService()
+    rag.load_documents()
+    return rag
+
+
+# Application-scoped singletons — created once, reused per request.
+_rag_service = get_rag_service()
+_memory_service = MemoryService()
+_chat_service = ChatService(_rag_service, _memory_service)
+
+
+def get_chat_service() -> ChatService:
+    return _chat_service
+
+
+def get_memory_service() -> MemoryService:
+    return _memory_service
+
+
+class ChatRequest(BaseModel):
+    message: str
+
 
 @router.get("/")
 def root():
     return {"message": "SLM Assistant is running"}
 
+
 @router.post("/chat")
-def chat(input_text: str):
-    response = chat_service.handle_chat(input_text)
+def chat(
+    request: ChatRequest,
+    chat_service: ChatService = Depends(get_chat_service),
+):
+    response = chat_service.handle_chat(request.message)
     return {"response": response}
+
+
+@router.get("/history")
+def history(
+    memory_service: MemoryService = Depends(get_memory_service),
+):
+    messages = memory_service.get_all()
+    return {"history": [{"role": m.role, "content": m.content} for m in messages]}
+
+
+@router.post("/history/clear")
+def clear_history(
+    memory_service: MemoryService = Depends(get_memory_service),
+):
+    memory_service.clear()
+    return {"message": "History cleared"}
